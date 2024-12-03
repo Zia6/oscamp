@@ -1,7 +1,6 @@
 use std::fs::{self, File, FileType};
 use std::io::{self, prelude::*};
 use std::{string::String, vec::Vec};
-
 #[cfg(all(not(feature = "axstd"), unix))]
 use std::os::unix::fs::{FileTypeExt, PermissionsExt};
 
@@ -27,6 +26,8 @@ const CMD_TABLE: &[(&str, CmdHandler)] = &[
     ("pwd", do_pwd),
     ("rm", do_rm),
     ("uname", do_uname),
+    ("mv",do_mv),
+    ("rename",do_rename),
 ];
 
 fn file_type_to_char(ty: FileType) -> char {
@@ -286,6 +287,58 @@ pub fn run_cmd(line: &[u8]) {
     }
 }
 
+fn do_mv(args: &str) {
+    fn get_file_name(path: &str) -> &str {
+        // 移除结尾的 '/'
+        let path = path.trim_end_matches('/');
+        
+        // 处理空路径
+        if path.is_empty() {
+            return path;
+        }
+        
+        // 取最后一个分隔符后的部分
+        match path.rsplit('/').next() {
+            Some(name) => name,
+            None => path,
+        }
+    }
+    if args.is_empty() {
+        print_err!("mv", "missing operand");
+        return;
+    }
+    let (src, dst) = split_whitespace(args);
+    if dst.contains(char::is_whitespace) {
+        print_err!("mv", "too many arguments");
+        return;
+    }
+    
+    fn mv_one(src: &str, dst: &str) -> io::Result<()>{
+        let buf = fs::read(src)?;
+        let name = get_file_name(src);
+        let dst = format!("{}/{}", dst, name);
+        fs::write(&dst, buf);
+        fs::remove_file(src)
+    }
+    if let Err(e) = mv_one(src, dst) {
+        print_err!("mv", format_args!("cannot move '{src}' to '{dst}'"), e);
+    }
+    
+}
+
+
+fn do_rename(args: &str){
+    let mut paths: Vec<_> = args.split_whitespace().collect();
+    if paths.len() != 2 {
+        print_err!("mv", "missing file operand");
+        return;
+    }
+    let target = paths.pop().unwrap();
+    let source = paths.pop().unwrap();
+    if let Err(e) = fs::rename(source, target) {
+        print_err!("rename", source, e);
+    }
+}
 fn split_whitespace(str: &str) -> (&str, &str) {
     let str = str.trim();
     str.find(char::is_whitespace)

@@ -58,15 +58,14 @@ impl <const PAGE_SIZE: usize> BaseAllocator for EarlyAllocator<PAGE_SIZE> {
         self.regions[0] = Region {
             start,
             end: start + size,
-            next: start,  // 从起始位置开始分配
+            next: start, 
         };
-        self.bitmap = 1;  // 设置第一位为1
+        self.bitmap = 1; 
         self.current_region = 0;
         self.total_size = size;
         self.used_size = 0;
     }
     fn add_memory(&mut self, start: usize, size: usize) -> AllocResult {
-        // 找第一个空闲位置
         let mut idx = 0;
         while idx < 64 {
             if (self.bitmap & (1 << idx)) == 0 {
@@ -74,15 +73,14 @@ impl <const PAGE_SIZE: usize> BaseAllocator for EarlyAllocator<PAGE_SIZE> {
                 self.regions[idx] = Region {
                     start,
                     end: start + size,
-                    next: start,  // 从头开始分配
+                    next: start,
                 };
-                self.bitmap |= 1 << idx;  // 设置对应位为1
+                self.bitmap |= 1 << idx;
                 self.total_size += size;
                 return Ok(());
             }
             idx += 1;
         }
-        // 没有空闲位置了
         Err(AllocError::NoMemory)
     }
 }
@@ -92,25 +90,20 @@ impl  <const PAGE_SIZE: usize> ByteAllocator for EarlyAllocator<PAGE_SIZE> {
         let size = layout.size();
         let align = layout.align();
         
-        // 从当前区域开始尝试分配
         let mut region_idx = self.current_region;
-        let mut tried_regions = 0u64;  // 用于记录尝试过哪些区域
-        
+        let mut tried_regions = 0u64; 
         while tried_regions != self.bitmap {
-            if (self.bitmap & (1 << region_idx)) != 0 {  // 如果这个区域有效
+            if (self.bitmap & (1 << region_idx)) != 0 {
                 let region = &mut self.regions[region_idx];
-                
-                // 计算对齐后的地址
+            
                 let aligned_next = (region.next + align - 1) & !(align - 1);
                 if aligned_next + size <= region.end {
-                    // 有足够空间
                     let ptr = aligned_next as *mut u8;
                     region.next = aligned_next + size;
                     self.used_size += size;
                     return Ok(NonNull::new(ptr).unwrap());
                 }
             }
-            // 尝试下一个区域
             tried_regions |= 1 << region_idx;
             region_idx = (region_idx + 1) % 64;
         }
@@ -138,7 +131,6 @@ impl <const PAGE_SIZE: usize> PageAllocator for EarlyAllocator<PAGE_SIZE> {
     const PAGE_SIZE: usize = PAGE_SIZE;
 
     fn alloc_pages(&mut self, num_pages: usize, align_pow2: usize) -> AllocResult<usize> {
-        // 转换成字节的Layout来复用alloc的逻辑
         let layout = Layout::from_size_align(
             num_pages * Self::PAGE_SIZE,
             1 << align_pow2

@@ -1,7 +1,6 @@
 use page_table_entry::MappingFlags;
 use riscv::register::scause::{self, Exception as E, Trap};
 use riscv::register::stval;
-
 use super::TrapFrame;
 
 include_asm_marcos!();

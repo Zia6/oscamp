@@ -8,7 +8,9 @@ use axtask::current;
 use axtask::TaskExtRef;
 use axhal::paging::MappingFlags;
 use arceos_posix_api as api;
-
+use axstd::vec;
+use memory_addr::{PAGE_SIZE_4K, MemoryAddr};
+use arceos_posix_api::get_file_like;
 const SYS_IOCTL: usize = 29;
 const SYS_OPENAT: usize = 56;
 const SYS_CLOSE: usize = 57;
@@ -140,7 +142,43 @@ fn sys_mmap(
     fd: i32,
     _offset: isize,
 ) -> isize {
-    unimplemented!("no sys_mmap!");
+    let current_task = axtask::current();
+    let mut addr_space = current_task.task_ext().aspace.lock();
+    let addr_src = if addr.is_null() {
+        addr_space.find_free_area(addr_space.base(), length, memory_addr::VirtAddrRange::from_start_size(addr_space.base(), addr_space.size())).unwrap()
+    } else {
+        (addr as usize).into()
+    };
+    let addr = addr_src.align_up_4k() + 2 * 0x19000;
+    let size = memory_addr::align_up(length, PAGE_SIZE_4K);
+    let prot = MmapProt::from_bits_truncate(prot);
+    let flags = MmapFlags::from_bits_truncate(flags);
+    let mapping_flags = MappingFlags::from(prot);
+    if addr_space
+        .map_alloc(addr, size, mapping_flags, true)
+        .is_err()
+    {
+        return -LinuxError::ENOMEM.code() as isize;
+    }
+    if flags.contains(MmapFlags::MAP_ANONYMOUS) {
+        return addr.as_usize() as isize;
+    }
+    // TODO
+    if fd >= 0 {
+        let file = match get_file_like(fd as _) {
+            Ok(f) => f,
+            Err(_) => return -LinuxError::EBADF.code() as isize,
+        };
+        let mut buf = vec![0u8; size];
+        let read_size = match file.read(&mut buf) {
+            Ok(s) => s,
+            Err(_) => return -LinuxError::EIO.code() as isize,
+        };
+        if addr_space.write(addr, &buf[..read_size]).is_err() {
+            return -LinuxError::EFAULT.code() as isize;
+        }
+    }
+    addr.as_usize() as isize
 }
 
 fn sys_openat(dfd: c_int, fname: *const c_char, flags: c_int, mode: api::ctypes::mode_t) -> isize {
